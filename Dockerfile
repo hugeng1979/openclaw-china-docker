@@ -7,7 +7,7 @@ RUN apt-get update && \
 
 USER node
 RUN pip3 install playwright --break-system-packages && \
-    playwright install chromium && 、
+    playwright install chromium && \
     pip3 install tavily-python --break-system-packages
 
 USER root
