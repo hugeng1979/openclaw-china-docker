@@ -1,35 +1,36 @@
-name: 当上游镜像更新时，自动构建我的镜像
+name: 当上游镜像更新或代码变化时，自动构建镜像
 
 on:
-  # 1. (推荐) 定时触发：例如，每天 UTC 时间 0 点检查一次
   schedule:
     - cron: '0 0 * * *'
-  # 2. (可选) 手动触发：方便你随时在 GitHub 页面上点击运行
   workflow_dispatch:
+  # 3. (可选) 当代码推送到 main/master 分支时也触发
+  push:
+    branches:
+      - main
+      - master
 
 jobs:
   check-and-build:
     runs-on: ubuntu-latest
     
     steps:
-      # 1. 检出你的代码
       - name: 检出代码
         uses: actions/checkout@v4
       
-      # 2. 恢复上次保存的上游镜像摘要缓存
-      - name: 恢复上游镜像摘要缓存
+      - name: 恢复缓存
         uses: actions/cache@v3
         with:
-          path: upstream-digest.txt
-          key: upstream-digest-cache
+          path: |
+            upstream-digest.txt
+            last-commit.txt
+          key: build-cache
       
-      # 3. 安装 skopeo 和 jq（用于检查镜像摘要）
       - name: 安装依赖工具
         run: |
           sudo apt-get update
           sudo apt-get install -y skopeo jq
       
-      # 4. 获取上游镜像最新摘要
       - name: 获取上游镜像最新摘要
         id: inspect-upstream
         run: |
@@ -38,38 +39,56 @@ jobs:
           echo "digest=$DIGEST" >> $GITHUB_OUTPUT
           echo "上游镜像最新摘要: $DIGEST"
       
-      # 5. 生成当前日期（用于镜像标签）
       - name: 生成当前日期
         id: date
         run: |
           echo "date=$(date +'%Y.%m.%d')" >> $GITHUB_OUTPUT
           echo "当前日期: $(date +'%Y.%m.%d')"
       
-      # 6. 比较上游镜像摘要，决定是否需要构建
-      - name: 比较上游镜像摘要
+      - name: 比较变化
         id: compare
         run: |
           CACHED_DIGEST=""
           if [ -f upstream-digest.txt ]; then
             CACHED_DIGEST=$(cat upstream-digest.txt)
-            echo "上次构建使用的摘要: $CACHED_DIGEST"
+            echo "上次构建使用的上游摘要: $CACHED_DIGEST"
           else
             echo "未找到缓存摘要，这是首次运行"
           fi
           
           NEW_DIGEST="${{ steps.inspect-upstream.outputs.digest }}"
           
-          if [ "$CACHED_DIGEST" == "$NEW_DIGEST" ]; then
-            echo "没有检测到上游镜像更新，跳过构建。"
+          CURRENT_COMMIT=$(git rev-parse HEAD)
+          echo "当前 commit: $CURRENT_COMMIT"
+          
+          CACHED_COMMIT=""
+          if [ -f last-commit.txt ]; then
+            CACHED_COMMIT=$(cat last-commit.txt)
+            echo "上次构建使用的 commit: $CACHED_COMMIT"
+          fi
+          
+          SHOULD_BUILD=false
+          
+          if [ "$CACHED_DIGEST" != "$NEW_DIGEST" ]; then
+            echo "上游镜像有更新，需要构建"
+            SHOULD_BUILD=true
+          fi
+          
+          if [ "$CACHED_COMMIT" != "$CURRENT_COMMIT" ]; then
+            echo "代码有变化（commit: $CURRENT_COMMIT），需要构建"
+            SHOULD_BUILD=true
+          fi
+          
+          if [ "$SHOULD_BUILD" = false ]; then
+            echo "没有检测到任何变化，跳过构建"
             echo "should_build=false" >> $GITHUB_OUTPUT
           else
-            echo "检测到上游镜像更新！开始构建你的镜像。"
+            echo "检测到变化，开始构建镜像"
             echo "should_build=true" >> $GITHUB_OUTPUT
-            # 保存新的摘要，供下次运行使用
             echo $NEW_DIGEST > upstream-digest.txt
+            echo $CURRENT_COMMIT > last-commit.txt
           fi
       
-      # 7. 登录 Docker Hub
       - name: 登录 Docker Hub
         if: steps.compare.outputs.should_build == 'true'
         uses: docker/login-action@v3
@@ -77,7 +96,6 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
       
-      # 8. 构建并推送 Docker 镜像
       - name: 构建并推送 Docker 镜像
         if: steps.compare.outputs.should_build == 'true'
         uses: docker/build-push-action@v5
@@ -88,10 +106,11 @@ jobs:
             hugeng/openclaw-china-docker:latest
             hugeng/openclaw-china-docker:${{ steps.date.outputs.date }}
       
-      # 9. 保存本次的上游镜像摘要缓存（供下次比较使用）
-      - name: 保存上游镜像摘要缓存
+      - name: 保存缓存
         if: steps.compare.outputs.should_build == 'true'
         uses: actions/cache@v3
         with:
-          path: upstream-digest.txt
-          key: upstream-digest-cache
+          path: |
+            upstream-digest.txt
+            last-commit.txt
+          key: build-cache
