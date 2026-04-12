@@ -1,0 +1,76 @@
+name: 当上游镜像更新时，自动构建我的镜像
+
+on:
+  # 1. (推荐) 定时触发：例如，每天 UTC 时间 0 点检查一次
+  schedule:
+    - cron: '0 0 * * *'
+  # 2. (可选) 手动触发：方便你随时在 GitHub 页面上点击运行
+  workflow_dispatch:
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. 检出你的代码
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 2. 检查上游镜像是否有更新
+      - name: 获取上游镜像最新摘要
+        id: inspect-upstream
+        run: |
+          # 使用 skopeo 工具检查镜像，避免拉取整个镜像，速度快且节省流量
+          UPSTREAM_IMAGE="justlikemaki/openclaw-docker-cn-im:latest"
+          DIGEST=$(skopeo inspect docker://$UPSTREAM_IMAGE | jq -r '.Digest')
+          echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+          echo "上游镜像最新摘要: $DIGEST"
+
+      # 3. 比较并决定是否构建 (核心逻辑)
+      - name: 比较上游镜像摘要
+        id: compare
+        run: |
+          # 从之前的构建记录中获取已使用的上游镜像摘要
+          # 这里使用 GitHub Actions 的缓存功能来保存这个摘要
+          CACHED_DIGEST=""
+          if [ -f upstream-digest.txt ]; then
+            CACHED_DIGEST=$(cat upstream-digest.txt)
+          fi
+          
+          NEW_DIGEST="${{ steps.inspect-upstream.outputs.digest }}"
+          
+          if [ "$CACHED_DIGEST" == "$NEW_DIGEST" ]; then
+            echo "没有检测到上游镜像更新，跳过构建。"
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "检测到上游镜像更新！开始构建你的镜像。"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            # 保存新的摘要，供下次运行使用
+            echo $NEW_DIGEST > upstream-digest.txt
+          fi
+
+      # 4. 登录 Docker Hub
+      - name: 登录 Docker Hub
+        if: steps.compare.outputs.should_build == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # 5. 构建并推送你的镜像
+      - name: 构建并推送 Docker 镜像
+        if: steps.compare.outputs.should_build == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            hugeng/openclaw-china-docker:latest
+            hugeng/openclaw-china-docker:latest-${{ github.run_number }}
+          
+      # 6. (可选) 缓存上游镜像摘要，用于下次比较
+      - name: 缓存上游镜像摘要
+        if: steps.compare.outputs.should_build == 'true'
+        uses: actions/cache/save@v3
+        with:
+          path: upstream-digest.txt
+          key: upstream-digest-${{ github.run_id }}
