@@ -102,12 +102,12 @@ jobs:
           tags: |
             hugeng/openclaw-china-docker:latest
             hugeng/openclaw-china-docker:${{ steps.date.outputs.date }}
-      
+
       # 更新 GitHub Variables（使用 GitHub CLI）
       - name: 更新构建状态到 GitHub Variables
         if: steps.compare.outputs.should_build == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}  # 改用 PAT
         run: |
           # 更新上游摘要变量
           gh variable set CACHED_UPSTREAM_DIGEST --body "${{ steps.inspect-upstream.outputs.digest }}"
