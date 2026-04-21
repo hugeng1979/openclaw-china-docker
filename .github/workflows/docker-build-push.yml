@@ -24,14 +24,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y skopeo jq
       
-      - name: 获取上游镜像最新摘要
-        id: inspect-upstream
-        run: |
-          UPSTREAM_IMAGE="justlikemaki/openclaw-docker-cn-im:latest"
-          DIGEST=$(skopeo inspect docker://$UPSTREAM_IMAGE | jq -r '.Digest')
-          echo "digest=$DIGEST" >> $GITHUB_OUTPUT
-          echo "上游镜像最新摘要: $DIGEST"
-      
+   
       - name: 生成当前日期
         id: date
         run: |
@@ -42,6 +35,7 @@ jobs:
         run: |
           SHOULD_BUILD=true
           echo "开始构建镜像"
+          echo "should_build=true" >> $GITHUB_OUTPUT
       
       - name: 登录 Docker Hub
         if: steps.compare.outputs.should_build == 'true'
@@ -61,14 +55,4 @@ jobs:
             hugeng/openclaw-china-docker2:latest
             hugeng/openclaw-china-docker2:${{ steps.date.outputs.date }}
 
-      # 更新 GitHub Variables（使用 GitHub CLI）
-      - name: 更新构建状态到 GitHub Variables
-        if: steps.compare.outputs.should_build == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}  # 改用 PAT
-        run: |
-          # 更新上游摘要变量
-          gh variable set CACHED_UPSTREAM_DIGEST --body "${{ steps.inspect-upstream.outputs.digest }}"
-          # 更新 commit 变量
-          gh variable set CACHED_LAST_COMMIT --body "$(git rev-parse HEAD)"
-          echo "已更新 GitHub Variables"
+     
