@@ -121,3 +121,17 @@ WORKDIR /home/node
 
 # 使用初始化脚本作为入口点
 ENTRYPOINT ["/bin/bash", "/usr/local/bin/init.sh"]
+
+#增加我的自定义配置，安装我需要的软件
+USER root
+RUN apt-get update && \
+    apt-get install -y python3-pip && \
+    rm -rf /var/lib/apt/lists/*
+
+USER node
+RUN pip3 install playwright --break-system-packages && \
+    playwright install chromium && \
+    pip3 install tavily-python --break-system-packages
+
+USER root
+WORKDIR /home/node
